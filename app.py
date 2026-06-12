@@ -311,7 +311,7 @@ st.markdown("""
 st.markdown("""
 <div class="hero">
     <div class="badge">RegTech AI Platform</div>
-    <h1>⚖️ مُمتَثِل</h1>
+    <h1>مُمتَثِل</h1>
     <h2>منصة ذكية لمحاكاة مخاطر الامتثال والعواقب التنظيمية</h2>
     <p>
     مُمتَثِل لا يراجع العقد كمستند فقط، بل يقرأه من عدة زوايا:
@@ -321,7 +321,6 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
-
 
 # =========================
 # 2. HOW IT WORKS
