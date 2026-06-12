@@ -231,8 +231,6 @@ hr {
 }
 </style>
 """, unsafe_allow_html=True)
-</style>
-""", unsafe_allow_html=True)
 
 
 def extract_text_from_file(uploaded_file):
