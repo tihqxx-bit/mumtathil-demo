@@ -523,6 +523,29 @@ if analyze and not uploaded_file:
     st.warning("ارفع ملفًا أولًا عشان يبدأ الفحص.")
 
 if uploaded_file and analyze:
+        contract_text = extract_text_from_file(uploaded_file)
+    results = analyze_contract(contract_text, match_source)
+    if not results:
+        st.success("لم يتم اكتشاف مخاطر واضحة بناءً على قاعدة البيانات الحالية.")
+    else:
+        st.error(f"تم اكتشاف {len(results)} مخاطر محتملة")
+
+        for i, item in enumerate(results, start=1):
+            st.markdown(f"### 🚩 الخطر رقم {i}: {item['topic']}")
+
+            st.write(f"**الجهة المرتبطة:** {item['authority']}")
+            st.write(f"**مستوى الخطورة:** {item['risk_level']}")
+            st.write(f"**الكلمات المكتشفة:** {item['matched_keywords']}")
+
+            st.warning(item["problem"])
+
+            st.markdown("**العواقب المحتملة:**")
+            st.write(item["consequence"])
+
+            st.markdown("**الصياغة / الإجراء المقترح:**")
+            st.success(item["suggested_fix"])
+
+            st.divider()
     st.markdown("""
     <div class="result-box">
         <h2>📊 نتيجة الفحص الأولية</h2>
