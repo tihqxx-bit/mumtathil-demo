@@ -1,4 +1,7 @@
 import streamlit as st
+import pandas as pd
+import fitz  # PyMuPDF
+from docx import Document
 
 st.set_page_config(
     page_title="مُمتَثِل | منصة الامتثال الذكية",
@@ -228,6 +231,79 @@ hr {
 }
 </style>
 """, unsafe_allow_html=True)
+</style>
+""", unsafe_allow_html=True)
+
+
+def extract_text_from_file(uploaded_file):
+    file_name = uploaded_file.name.lower()
+
+    if file_name.endswith(".txt"):
+        return uploaded_file.read().decode("utf-8", errors="ignore")
+
+    elif file_name.endswith(".pdf"):
+        text = ""
+        pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        for page in pdf:
+            text += page.get_text()
+        return text
+
+    elif file_name.endswith(".docx"):
+        doc = Document(uploaded_file)
+        text = "\n".join([p.text for p in doc.paragraphs])
+        return text
+
+    return ""
+
+
+def load_regulations():
+    return pd.read_csv("regulations.csv")
+
+
+def analyze_contract(contract_text, match_source):
+    regulations = load_regulations()
+    results = []
+
+    contract_text_lower = contract_text.lower()
+
+    for _, row in regulations.iterrows():
+        authority = str(row["authority"])
+        keywords = str(row["keywords"]).split(",")
+
+        if "SAMA" in match_source and authority != "SAMA":
+            continue
+
+        if "CMA" in match_source and authority != "CMA":
+            continue
+
+        if "سياسات الشركة" in match_source and authority != "Internal":
+            continue
+
+        matched_keywords = []
+
+        for keyword in keywords:
+            keyword = keyword.strip()
+            if keyword and keyword.lower() in contract_text_lower:
+                matched_keywords.append(keyword)
+
+        if matched_keywords:
+            results.append({
+                "authority": row["authority"],
+                "topic": row["topic"],
+                "risk_level": row["risk_level"],
+                "matched_keywords": "، ".join(matched_keywords),
+                "problem": row["problem"],
+                "consequence": row["consequence"],
+                "suggested_fix": row["suggested_fix"]
+            })
+
+    return results
+
+
+# بعدها كود الواجهة يكمل عادي
+st.markdown("""
+<div class="hero">
+...
 
 
 # =========================
