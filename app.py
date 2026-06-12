@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import fitz  # PyMuPDF
 
 st.set_page_config(
     page_title="ممتثل",
@@ -85,6 +86,13 @@ st.markdown("""
     padding: 16px;
 }
 
+.blue-box {
+    background: rgba(37,99,235,0.14);
+    border: 1px solid rgba(96,165,250,0.4);
+    border-radius: 16px;
+    padding: 16px;
+}
+
 .stButton > button {
     width: 100%;
     height: 55px;
@@ -100,10 +108,14 @@ st.markdown("""
 
 
 # =========================
-# DATA FUNCTIONS
+# DATA
 # =========================
 
 def load_regulations():
+    """
+    يحاول قراءة ملف regulations.csv.
+    إذا ما كان موجود، يستخدم داتا تجريبية داخلية.
+    """
     try:
         return pd.read_csv("regulations.csv")
     except Exception:
@@ -155,15 +167,31 @@ def load_regulations():
 
 
 def extract_text_from_file(uploaded_file):
+    """
+    استخراج النص من TXT أو PDF.
+    """
     file_name = uploaded_file.name.lower()
 
     if file_name.endswith(".txt"):
         return uploaded_file.read().decode("utf-8", errors="ignore")
 
+    if file_name.endswith(".pdf"):
+        text = ""
+        file_bytes = uploaded_file.read()
+        pdf = fitz.open(stream=file_bytes, filetype="pdf")
+
+        for page in pdf:
+            text += page.get_text()
+
+        return text
+
     return ""
 
 
 def analyze_contract(contract_text, match_source):
+    """
+    تحليل العقد بناء على الكلمات المفتاحية في قاعدة البيانات.
+    """
     regulations = load_regulations()
     results = []
     contract_text_lower = contract_text.lower()
@@ -172,14 +200,17 @@ def analyze_contract(contract_text, match_source):
         authority = str(row["authority"])
         keywords = str(row["keywords"]).split(",")
 
-        if "SAMA" in match_source and authority != "SAMA":
+        # فلترة حسب مصدر المطابقة
+        if match_source == "سياسات الشركة الداخلية فقط" and authority != "Internal":
             continue
 
-        if "CMA" in match_source and authority != "CMA":
+        if match_source == "لوائح SAMA فقط" and authority != "SAMA":
             continue
 
-        if "الشركة" in match_source and authority != "Internal":
+        if match_source == "لوائح CMA فقط" and authority != "CMA":
             continue
+
+        # المراجعة الشاملة لا تسوي فلترة
 
         matched_keywords = []
 
@@ -200,6 +231,36 @@ def analyze_contract(contract_text, match_source):
             })
 
     return results
+
+
+def calculate_scores(results):
+    """
+    حساب نسبة الخطورة ودرجة الامتثال.
+    """
+    high_count = sum(1 for item in results if item["risk_level"] == "High")
+    medium_count = sum(1 for item in results if item["risk_level"] == "Medium")
+    low_count = sum(1 for item in results if item["risk_level"] == "Low")
+
+    risk_score = min((high_count * 25) + (medium_count * 12) + (low_count * 5), 100)
+    compliance_score = max(100 - risk_score, 0)
+
+    return risk_score, compliance_score, high_count, medium_count, low_count
+
+
+def get_final_message(risk_score, results_count):
+    """
+    يعطي جملة نهائية حسب وضع الملف.
+    """
+    if results_count == 0:
+        return "ملفك سليم بناء على قاعدة البيانات الحالية، ولم يتم اكتشاف مخاطر واضحة.", "success"
+
+    if risk_score >= 75:
+        return "ملفك عالي الخطورة ويحتاج مراجعة قانونية وامتثالية قبل الاعتماد.", "error"
+
+    if risk_score >= 40:
+        return "ملفك يحتوي على مخاطر متوسطة، ويحتاج تعديل بعض البنود قبل الاعتماد.", "warning"
+
+    return "ملفك يحتوي على ملاحظات بسيطة، لكنه قريب من الوضع المقبول بعد مراجعة نهائية.", "info"
 
 
 # =========================
@@ -231,7 +292,7 @@ with c1:
     st.markdown("""
     <div class="card">
         <h3>1. رفع المستند</h3>
-        <p>يرفع المستخدم عقدا أو سياسة.</p>
+        <p>يرفع المستخدم عقدا أو سياسة بصيغة TXT أو PDF.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -239,7 +300,7 @@ with c2:
     st.markdown("""
     <div class="card">
         <h3>2. اختيار المطابقة</h3>
-        <p>سياسات الشركة أو SAMA أو CMA.</p>
+        <p>سياسات الشركة أو SAMA أو CMA أو مراجعة شاملة.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -255,7 +316,7 @@ with c4:
     st.markdown("""
     <div class="card">
         <h3>4. تقرير المخاطر</h3>
-        <p>درجة خطورة، عواقب، وتوصيات.</p>
+        <p>نسبة خطورة، درجة امتثال، عواقب، وتوصيات.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -300,7 +361,7 @@ left, right = st.columns([1.1, 0.9])
 with left:
     uploaded_file = st.file_uploader(
         "ارفع ملف العقد أو السياسة",
-        type=["txt"]
+        type=["txt", "pdf"]
     )
 
     match_source = st.selectbox(
@@ -335,6 +396,7 @@ with left:
     )
 
     confidential_mode = st.checkbox("تفعيل وضع المراجعة السرية")
+    show_extracted_text = st.checkbox("عرض النص المستخرج للتأكد")
     analyze = st.button("ابدأ الفحص الآن")
 
 with right:
@@ -348,66 +410,113 @@ with right:
     </div>
     """, unsafe_allow_html=True)
 
+    st.markdown("""
+    <div class="card">
+        <h3>ملاحظة</h3>
+        <p>
+        هذه نسخة MVP تعتمد حاليا على الكلمات المفتاحية وقاعدة بيانات مصغرة.
+        لاحقا يمكن تطويرها إلى RAG كامل مربوط بلوائح رسمية وسياسات الشركة.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
 
 # =========================
 # RESULTS
 # =========================
 
 if analyze and not uploaded_file:
-    st.warning("ارفع ملف TXT أولا عشان يبدأ الفحص.")
+    st.warning("ارفع ملف TXT أو PDF أولا عشان يبدأ الفحص.")
 
 if uploaded_file and analyze:
     contract_text = extract_text_from_file(uploaded_file)
-    results = analyze_contract(contract_text, match_source)
 
-    st.header("نتيجة الفحص")
+    if show_extracted_text:
+        st.text_area("النص المستخرج من الملف", contract_text, height=220)
 
-    st.write("وضعية القراءة المختارة:", review_mode)
-    st.write("شهية المخاطر:", risk_appetite)
-    st.write("وضع السرية:", "مفعل" if confidential_mode else "غير مفعل")
-
-    if not results:
-        st.success("لم يتم اكتشاف مخاطر واضحة بناء على قاعدة البيانات الحالية.")
+    if not contract_text.strip():
+        st.error("لم يتمكن النظام من قراءة النص من الملف. جرّب ملف TXT أو PDF يحتوي على نص قابل للنسخ.")
     else:
-        st.error(f"تم اكتشاف {len(results)} مخاطر محتملة")
+        results = analyze_contract(contract_text, match_source)
+        risk_score, compliance_score, high_count, medium_count, low_count = calculate_scores(results)
+        final_message, message_type = get_final_message(risk_score, len(results))
 
-        high_count = sum(1 for item in results if item["risk_level"] == "High")
-        medium_count = sum(1 for item in results if item["risk_level"] == "Medium")
+        st.header("نتيجة الفحص")
 
-        k1, k2, k3 = st.columns(3)
+        st.write("مصدر المطابقة:", match_source)
+        st.write("وضعية القراءة المختارة:", review_mode)
+        st.write("شهية المخاطر:", risk_appetite)
+        st.write("وضع السرية:", "مفعل" if confidential_mode else "غير مفعل")
+
+        k1, k2, k3, k4 = st.columns(4)
+
         with k1:
-            st.metric("إجمالي المخاطر", len(results))
+            st.metric("نسبة الخطورة", f"{risk_score}%")
+
         with k2:
-            st.metric("مخاطر عالية", high_count)
+            st.metric("درجة الامتثال", f"{compliance_score}/100")
+
         with k3:
+            st.metric("مخاطر عالية", high_count)
+
+        with k4:
             st.metric("مخاطر متوسطة", medium_count)
 
-        for i, item in enumerate(results, start=1):
-            st.subheader(f"الخطر رقم {i}: {item['topic']}")
+        # الجملة النهائية حسب حالة الملف
+        if message_type == "success":
+            st.success(final_message)
+        elif message_type == "error":
+            st.error(final_message)
+        elif message_type == "warning":
+            st.warning(final_message)
+        else:
+            st.info(final_message)
 
-            st.write("الجهة المرتبطة:", item["authority"])
-            st.write("مستوى الخطورة:", item["risk_level"])
-            st.write("الكلمات المكتشفة:", item["matched_keywords"])
-
-            st.markdown(f"""
-            <div class="yellow-box">
-            <b>المشكلة:</b><br>
-            {item["problem"]}
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown(f"""
-            <div class="red-box">
-            <b>العواقب المحتملة:</b><br>
-            {item["consequence"]}
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown(f"""
+        if not results:
+            st.markdown("""
             <div class="green-box">
-            <b>الإجراء المقترح:</b><br>
-            {item["suggested_fix"]}
+            لم يتم اكتشاف مخاطر واضحة في هذا الملف بناء على قاعدة البيانات الحالية.
+            مع ذلك، هذه النتيجة لا تعتبر رأيا قانونيا نهائيا، وينصح بالمراجعة النهائية عند العقود الحساسة.
             </div>
             """, unsafe_allow_html=True)
+        else:
+            st.error(f"تم اكتشاف {len(results)} مخاطر محتملة")
 
-            st.divider()
+            for i, item in enumerate(results, start=1):
+                st.subheader(f"الخطر رقم {i}: {item['topic']}")
+
+                st.write("الجهة المرتبطة:", item["authority"])
+                st.write("مستوى الخطورة:", item["risk_level"])
+                st.write("الكلمات المكتشفة:", item["matched_keywords"])
+
+                st.markdown(f"""
+                <div class="yellow-box">
+                <b>المشكلة:</b><br>
+                {item["problem"]}
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="red-box">
+                <b>العواقب المحتملة:</b><br>
+                {item["consequence"]}
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="green-box">
+                <b>الإجراء المقترح:</b><br>
+                {item["suggested_fix"]}
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.divider()
+
+            st.subheader("ملخص سريع للإدارة")
+
+            if risk_score >= 75:
+                st.error("التوصية: لا ينصح باعتماد الملف قبل تعديل البنود عالية الخطورة ومراجعته قانونيا.")
+            elif risk_score >= 40:
+                st.warning("التوصية: يمكن تحسين الملف بتعديل البنود متوسطة وعالية الخطورة قبل الاعتماد.")
+            else:
+                st.info("التوصية: الملف قريب من القبول، لكن يحتاج مراجعة نهائية حسب حساسية العقد.")
