@@ -15,54 +15,41 @@ st.set_page_config(
 st.markdown("""
 <style>
 .stApp {
-    background: linear-gradient(135deg, #08111F 0%, #0F172A 50%, #172554 100%);
+    background: linear-gradient(135deg, #08111F 0%, #0F172A 55%, #172554 100%);
     color: white;
 }
 
 .block-container {
-    max-width: 1200px;
+    max-width: 1050px;
     padding-top: 2rem;
 }
 
-.hero {
+.main-card {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.16);
-    border-radius: 28px;
-    padding: 40px;
-    margin-bottom: 25px;
+    border-radius: 26px;
+    padding: 34px;
+    margin-bottom: 22px;
 }
 
-.hero h1 {
-    font-size: 56px;
+.main-card h1 {
+    font-size: 52px;
     color: white;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
 }
 
-.hero h2 {
+.main-card p {
     color: #CBD5E1;
-    font-size: 24px;
-}
-
-.hero p {
-    color: #E5E7EB;
     font-size: 17px;
     line-height: 1.8;
 }
 
-.card {
+.result-card {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 20px;
-    padding: 22px;
-    margin-bottom: 18px;
-}
-
-.card h3 {
-    color: white;
-}
-
-.card p {
-    color: #CBD5E1;
+    border-radius: 22px;
+    padding: 24px;
+    margin-top: 20px;
 }
 
 .red-box {
@@ -86,13 +73,6 @@ st.markdown("""
     padding: 16px;
 }
 
-.blue-box {
-    background: rgba(37,99,235,0.14);
-    border: 1px solid rgba(96,165,250,0.4);
-    border-radius: 16px;
-    padding: 16px;
-}
-
 .stButton > button {
     width: 100%;
     height: 55px;
@@ -112,10 +92,6 @@ st.markdown("""
 # =========================
 
 def load_regulations():
-    """
-    يحاول قراءة ملف regulations.csv.
-    إذا ما كان موجود، يستخدم داتا تجريبية داخلية.
-    """
     try:
         return pd.read_csv("regulations.csv")
     except Exception:
@@ -155,21 +131,18 @@ def load_regulations():
                 "قد يخالف سياسات الشركة الداخلية أو يسبب ضعفا في الحوكمة."
             ],
             "suggested_fix": [
-                "يجب النص على إشعار العميل قبل تغيير الرسوم بمدة واضحة مع توضيح آلية الاعتراض أو الإنهاء.",
+                "إشعار العميل قبل تغيير الرسوم بمدة واضحة مع توضيح آلية الاعتراض أو الإنهاء.",
                 "إضافة بند يوضح طريقة تقديم الشكاوى ومدة الرد وآلية التصعيد.",
                 "توضيح متى ولماذا تتم مشاركة البيانات ومع من، مع الالتزام بسياسة الخصوصية.",
-                "تحديد حالات الإيقاف بوضوح مثل الاشتباه في احتيال أو مخالفة الشروط، مع إشعار العميل متى ما أمكن.",
-                "إضافة بند واضح يشرح حالات تضارب المصالح وكيفية إدارتها والإفصاح عنها.",
-                "إضافة بند أو إجراء يحدد صلاحيات الاعتماد والمراجعة الداخلية قبل توقيع العقد."
+                "تحديد حالات الإيقاف بوضوح مع إشعار العميل متى ما أمكن.",
+                "إضافة بند يشرح حالات تضارب المصالح وكيفية إدارتها والإفصاح عنها.",
+                "تحديد صلاحيات الاعتماد والمراجعة الداخلية قبل توقيع العقد."
             ]
         }
         return pd.DataFrame(data)
 
 
 def extract_text_from_file(uploaded_file):
-    """
-    استخراج النص من TXT أو PDF.
-    """
     file_name = uploaded_file.name.lower()
 
     if file_name.endswith(".txt"):
@@ -179,19 +152,14 @@ def extract_text_from_file(uploaded_file):
         text = ""
         file_bytes = uploaded_file.read()
         pdf = fitz.open(stream=file_bytes, filetype="pdf")
-
         for page in pdf:
             text += page.get_text()
-
         return text
 
     return ""
 
 
 def analyze_contract(contract_text, match_source):
-    """
-    تحليل العقد بناء على الكلمات المفتاحية في قاعدة البيانات.
-    """
     regulations = load_regulations()
     results = []
     contract_text_lower = contract_text.lower()
@@ -200,7 +168,6 @@ def analyze_contract(contract_text, match_source):
         authority = str(row["authority"])
         keywords = str(row["keywords"]).split(",")
 
-        # فلترة حسب مصدر المطابقة
         if match_source == "سياسات الشركة الداخلية فقط" and authority != "Internal":
             continue
 
@@ -209,8 +176,6 @@ def analyze_contract(contract_text, match_source):
 
         if match_source == "لوائح CMA فقط" and authority != "CMA":
             continue
-
-        # المراجعة الشاملة لا تسوي فلترة
 
         matched_keywords = []
 
@@ -234,9 +199,6 @@ def analyze_contract(contract_text, match_source):
 
 
 def calculate_scores(results):
-    """
-    حساب نسبة الخطورة ودرجة الامتثال.
-    """
     high_count = sum(1 for item in results if item["risk_level"] == "High")
     medium_count = sum(1 for item in results if item["risk_level"] == "Medium")
     low_count = sum(1 for item in results if item["risk_level"] == "Low")
@@ -248,9 +210,6 @@ def calculate_scores(results):
 
 
 def get_final_message(risk_score, results_count):
-    """
-    يعطي جملة نهائية حسب وضع الملف.
-    """
     if results_count == 0:
         return "ملفك سليم بناء على قاعدة البيانات الحالية، ولم يتم اكتشاف مخاطر واضحة.", "success"
 
@@ -264,119 +223,16 @@ def get_final_message(risk_score, results_count):
 
 
 # =========================
-# HERO
+# SIDEBAR
 # =========================
 
-st.markdown("""
-<div class="hero">
-    <h1>ممتثل</h1>
-    <h2>منصة ذكية لمحاكاة مخاطر الامتثال والعواقب التنظيمية</h2>
-    <p>
-    ممتثل يساعد الشركات المالية وشركات الفنتك على فحص العقود والسياسات،
-    ومطابقتها أولا مع سياسات الشركة الداخلية، ثم مع لوائح SAMA و CMA.
-    المنصة تكشف البنود الخطرة، العواقب المحتملة، والصياغات البديلة.
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-
-# =========================
-# HOW IT WORKS
-# =========================
-
-st.header("كيف تعمل المنصة؟")
-
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-    st.markdown("""
-    <div class="card">
-        <h3>1. رفع المستند</h3>
-        <p>يرفع المستخدم عقدا أو سياسة بصيغة TXT أو PDF.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with c2:
-    st.markdown("""
-    <div class="card">
-        <h3>2. اختيار المطابقة</h3>
-        <p>سياسات الشركة أو SAMA أو CMA أو مراجعة شاملة.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with c3:
-    st.markdown("""
-    <div class="card">
-        <h3>3. وضعية القراءة</h3>
-        <p>عميل، جهة رقابية، امتثال، أو قانوني.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with c4:
-    st.markdown("""
-    <div class="card">
-        <h3>4. تقرير المخاطر</h3>
-        <p>نسبة خطورة، درجة امتثال، عواقب، وتوصيات.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-# =========================
-# REVIEW MODES
-# =========================
-
-st.header("وضعيات قراءة العقد")
-
-m1, m2, m3 = st.columns(3)
-
-with m1:
-    st.info("قراءة كجهة رقابية SAMA: تركز على حماية العميل، الرسوم، الإفصاح، والإسناد الخارجي.")
-
-with m2:
-    st.info("قراءة كجهة رقابية CMA: تركز على الإفصاح، تضارب المصالح، وحماية المستثمر.")
-
-with m3:
-    st.info("قراءة كعميل متضرر: تبحث عن البنود التي قد تسبب شكوى أو اعتراض.")
-
-m4, m5, m6 = st.columns(3)
-
-with m4:
-    st.info("قراءة كمسؤول امتثال داخلي: تبحث عن البنود الناقصة وضعف الإجراءات.")
-
-with m5:
-    st.info("قراءة كمراجع قانوني: تركز على الصياغة والمسؤوليات والثغرات.")
-
-with m6:
-    st.info("محاكاة هجوم تنظيمي: تختبر أسوأ السيناريوهات المحتملة.")
-
-
-# =========================
-# INPUT
-# =========================
-
-st.header("ابدأ الفحص")
-
-left, right = st.columns([1.1, 0.9])
-
-with left:
-    uploaded_file = st.file_uploader(
-        "ارفع ملف العقد أو السياسة",
-        type=["txt", "pdf"]
-    )
-
-    match_source = st.selectbox(
-        "اختر مصدر المطابقة",
-        [
-            "مراجعة شاملة",
-            "سياسات الشركة الداخلية فقط",
-            "لوائح SAMA فقط",
-            "لوائح CMA فقط"
-        ]
-    )
+with st.sidebar:
+    st.title("إعدادات إضافية")
 
     review_mode = st.selectbox(
-        "اختر وضعية قراءة العقد",
+        "وضعية قراءة العقد",
         [
+            "قراءة عامة",
             "قراءة كجهة رقابية SAMA",
             "قراءة كجهة رقابية CMA",
             "قراءة كعميل متضرر",
@@ -395,31 +251,52 @@ with left:
         ]
     )
 
-    confidential_mode = st.checkbox("تفعيل وضع المراجعة السرية")
-    show_extracted_text = st.checkbox("عرض النص المستخرج للتأكد")
-    analyze = st.button("ابدأ الفحص الآن")
+    confidential_mode = st.checkbox("وضع المراجعة السرية")
+    show_extracted_text = st.checkbox("عرض النص المستخرج")
 
-with right:
-    st.markdown("""
-    <div class="card">
-        <h3>ماذا يفعل ممتثل؟</h3>
-        <p>
-        يقرأ العقد، يطابقه مع الداتا، يكتشف المخاطر،
-        يوضح العواقب، ثم يقترح صياغة أفضل.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.divider()
 
     st.markdown("""
-    <div class="card">
-        <h3>ملاحظة</h3>
-        <p>
-        هذه نسخة MVP تعتمد حاليا على الكلمات المفتاحية وقاعدة بيانات مصغرة.
-        لاحقا يمكن تطويرها إلى RAG كامل مربوط بلوائح رسمية وسياسات الشركة.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    **ممتثل** يفحص العقود والسياسات ويكشف:
+    
+    - البنود الخطرة  
+    - البنود الناقصة  
+    - العواقب المحتملة  
+    - الإجراء المقترح  
+    - نسبة الخطورة  
+    """)
 
+
+# =========================
+# MAIN PAGE
+# =========================
+
+st.markdown("""
+<div class="main-card">
+    <h1>ممتثل</h1>
+    <p>
+    منصة بسيطة لفحص امتثال العقود والسياسات. ارفع ملفك، اختر مصدر المطابقة،
+    ثم احصل على نتيجة مختصرة توضح نسبة الخطورة والملاحظات الأساسية.
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+uploaded_file = st.file_uploader(
+    "ارفع ملف العقد أو السياسة",
+    type=["txt", "pdf"]
+)
+
+match_source = st.selectbox(
+    "مصدر المطابقة",
+    [
+        "مراجعة شاملة",
+        "لوائح SAMA فقط",
+        "لوائح CMA فقط",
+        "سياسات الشركة الداخلية فقط"
+    ]
+)
+
+analyze = st.button("ابدأ الفحص")
 
 # =========================
 # RESULTS
@@ -441,12 +318,11 @@ if uploaded_file and analyze:
         risk_score, compliance_score, high_count, medium_count, low_count = calculate_scores(results)
         final_message, message_type = get_final_message(risk_score, len(results))
 
-        st.header("نتيجة الفحص")
-
-        st.write("مصدر المطابقة:", match_source)
-        st.write("وضعية القراءة المختارة:", review_mode)
-        st.write("شهية المخاطر:", risk_appetite)
-        st.write("وضع السرية:", "مفعل" if confidential_mode else "غير مفعل")
+        st.markdown("""
+        <div class="result-card">
+            <h2>نتيجة الفحص</h2>
+        </div>
+        """, unsafe_allow_html=True)
 
         k1, k2, k3, k4 = st.columns(4)
 
@@ -462,7 +338,6 @@ if uploaded_file and analyze:
         with k4:
             st.metric("مخاطر متوسطة", medium_count)
 
-        # الجملة النهائية حسب حالة الملف
         if message_type == "success":
             st.success(final_message)
         elif message_type == "error":
@@ -472,51 +347,49 @@ if uploaded_file and analyze:
         else:
             st.info(final_message)
 
+        st.caption(f"وضعية القراءة: {review_mode} | شهية المخاطر: {risk_appetite} | وضع السرية: {'مفعل' if confidential_mode else 'غير مفعل'}")
+
         if not results:
             st.markdown("""
             <div class="green-box">
             لم يتم اكتشاف مخاطر واضحة في هذا الملف بناء على قاعدة البيانات الحالية.
-            مع ذلك، هذه النتيجة لا تعتبر رأيا قانونيا نهائيا، وينصح بالمراجعة النهائية عند العقود الحساسة.
+            هذه النتيجة لا تعتبر رأيا قانونيا نهائيا.
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.error(f"تم اكتشاف {len(results)} مخاطر محتملة")
+            st.subheader("المخاطر المكتشفة")
 
             for i, item in enumerate(results, start=1):
-                st.subheader(f"الخطر رقم {i}: {item['topic']}")
+                with st.expander(f"الخطر رقم {i}: {item['topic']} - {item['risk_level']}"):
+                    st.write("الجهة المرتبطة:", item["authority"])
+                    st.write("الكلمات المكتشفة:", item["matched_keywords"])
 
-                st.write("الجهة المرتبطة:", item["authority"])
-                st.write("مستوى الخطورة:", item["risk_level"])
-                st.write("الكلمات المكتشفة:", item["matched_keywords"])
+                    st.markdown(f"""
+                    <div class="yellow-box">
+                    <b>المشكلة:</b><br>
+                    {item["problem"]}
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                st.markdown(f"""
-                <div class="yellow-box">
-                <b>المشكلة:</b><br>
-                {item["problem"]}
-                </div>
-                """, unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div class="red-box">
+                    <b>العواقب المحتملة:</b><br>
+                    {item["consequence"]}
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                st.markdown(f"""
-                <div class="red-box">
-                <b>العواقب المحتملة:</b><br>
-                {item["consequence"]}
-                </div>
-                """, unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div class="green-box">
+                    <b>الإجراء المقترح:</b><br>
+                    {item["suggested_fix"]}
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                st.markdown(f"""
-                <div class="green-box">
-                <b>الإجراء المقترح:</b><br>
-                {item["suggested_fix"]}
-                </div>
-                """, unsafe_allow_html=True)
-
-                st.divider()
-
-            st.subheader("ملخص سريع للإدارة")
+            st.subheader("الخلاصة")
 
             if risk_score >= 75:
-                st.error("التوصية: لا ينصح باعتماد الملف قبل تعديل البنود عالية الخطورة ومراجعته قانونيا.")
+                st.error("لا ينصح باعتماد الملف قبل تعديل البنود عالية الخطورة ومراجعته قانونيا.")
             elif risk_score >= 40:
-                st.warning("التوصية: يمكن تحسين الملف بتعديل البنود متوسطة وعالية الخطورة قبل الاعتماد.")
+                st.warning("يفضل تعديل البنود متوسطة وعالية الخطورة قبل الاعتماد.")
             else:
-                st.info("التوصية: الملف قريب من القبول، لكن يحتاج مراجعة نهائية حسب حساسية العقد.")
+                st.info("الملف قريب من القبول، لكن يحتاج مراجعة نهائية حسب حساسية العقد.")
