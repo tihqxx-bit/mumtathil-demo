@@ -1,20 +1,9 @@
-import os
+import html
 from io import BytesIO
 
-import streamlit as st
-import pandas as pd
 import fitz  # PyMuPDF
-
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_RIGHT, TA_CENTER
-from reportlab.lib import colors
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-
-import arabic_reshaper
-from bidi.algorithm import get_display
+import pandas as pd
+import streamlit as st
 
 
 st.set_page_config(
@@ -25,82 +14,95 @@ st.set_page_config(
 
 
 # =========================
-# تصميم بسيط
+# تصميم الواجهة
 # =========================
 
 st.markdown("""
 <style>
 .stApp {
-    background: linear-gradient(135deg, #08111F 0%, #0F172A 55%, #172554 100%);
+    background: #0f172a;
     color: white;
 }
 
 .block-container {
-    max-width: 900px;
+    max-width: 850px;
     padding-top: 2rem;
 }
 
 .main-card {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.16);
-    border-radius: 24px;
-    padding: 32px;
-    margin-bottom: 22px;
+    background: #111827;
+    border: 1px solid #334155;
+    border-radius: 22px;
+    padding: 28px;
+    margin-bottom: 20px;
 }
 
 .main-card h1 {
     color: white;
-    font-size: 48px;
+    font-size: 44px;
     margin-bottom: 8px;
 }
 
 .main-card p {
-    color: #CBD5E1;
+    color: #cbd5e1;
     font-size: 17px;
     line-height: 1.8;
 }
 
-.result-card {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 22px;
-    padding: 24px;
-    margin-top: 20px;
-}
-
-.red-box {
-    background: rgba(239,68,68,0.14);
-    border: 1px solid rgba(239,68,68,0.4);
+.note-box {
+    background: #1e293b;
+    border: 1px solid #475569;
     border-radius: 16px;
     padding: 16px;
+    margin-bottom: 16px;
+    color: #e2e8f0;
 }
 
-.green-box {
-    background: rgba(34,197,94,0.14);
-    border: 1px solid rgba(34,197,94,0.4);
+.issue-box {
+    background: #1e293b;
+    border: 1px solid #475569;
     border-radius: 16px;
-    padding: 16px;
-}
-
-.yellow-box {
-    background: rgba(245,158,11,0.14);
-    border: 1px solid rgba(245,158,11,0.4);
-    border-radius: 16px;
-    padding: 16px;
+    padding: 18px;
+    margin-bottom: 14px;
 }
 
 .blue-box {
-    background: rgba(37,99,235,0.14);
-    border: 1px solid rgba(96,165,250,0.4);
-    border-radius: 16px;
-    padding: 16px;
+    background: rgba(37, 99, 235, 0.18);
+    border: 1px solid rgba(96, 165, 250, 0.45);
+    border-radius: 14px;
+    padding: 14px;
+    margin-top: 10px;
+}
+
+.yellow-box {
+    background: rgba(245, 158, 11, 0.18);
+    border: 1px solid rgba(251, 191, 36, 0.45);
+    border-radius: 14px;
+    padding: 14px;
+    margin-top: 10px;
+}
+
+.red-box {
+    background: rgba(239, 68, 68, 0.18);
+    border: 1px solid rgba(248, 113, 113, 0.45);
+    border-radius: 14px;
+    padding: 14px;
+    margin-top: 10px;
+}
+
+.green-box {
+    background: rgba(34, 197, 94, 0.18);
+    border: 1px solid rgba(74, 222, 128, 0.45);
+    border-radius: 14px;
+    padding: 14px;
+    margin-top: 10px;
 }
 
 .stButton > button {
     width: 100%;
-    height: 55px;
+    height: 54px;
     border-radius: 14px;
-    background: linear-gradient(90deg, #2563EB, #14B8A6);
+    background: linear-gradient(90deg, #2563eb, #14b8a6);
     color: white;
     border: none;
     font-size: 18px;
@@ -109,12 +111,12 @@ st.markdown("""
 
 .stDownloadButton > button {
     width: 100%;
-    height: 50px;
+    height: 52px;
     border-radius: 14px;
-    background: #16A34A;
+    background: #16a34a;
     color: white;
     border: none;
-    font-size: 16px;
+    font-size: 17px;
     font-weight: bold;
 }
 </style>
@@ -122,87 +124,79 @@ st.markdown("""
 
 
 # =========================
-# بيانات SAMA التجريبية
+# قاعدة SAMA للديمو
 # =========================
 
 def load_sama_rules():
     """
-    إذا كان عندك ملف sama_rules.csv سيقرأه.
-    إذا ما كان موجود، يستخدم داتا تجريبية مدمجة.
+    داتا تجريبية للـ MVP.
+    الفكرة: لا نبحث عن كلمات عامة مثل رسوم وبيانات.
+    نبحث فقط عن عبارات خطرة تدل على مخالفة أو ضعف امتثال.
     """
-    try:
-        return pd.read_csv("sama_rules.csv")
-    except Exception:
-        data = {
-            "authority": [
-                "SAMA",
-                "SAMA",
-                "SAMA",
-                "SAMA",
-                "SAMA"
-            ],
-            "topic": [
-                "الإفصاح عن الرسوم",
-                "شكاوى العملاء",
-                "مشاركة بيانات العميل",
-                "إيقاف الخدمة أو الحساب",
-                "الإسناد الخارجي"
-            ],
-            "keywords": [
-                "رسوم,تعديل الرسوم,تغيير الرسوم,بدون إشعار,دون إشعار",
-                "شكوى,شكاوى,اعتراض,تظلم,خدمة العملاء",
-                "بيانات,مشاركة البيانات,طرف ثالث,مزود خدمة,خصوصية",
-                "إيقاف الخدمة,تعليق الحساب,إغلاق الحساب,حظر",
-                "إسناد خارجي,مزود خارجي,طرف خارجي,تعهيد,مزود خدمة"
-            ],
-            "risk_level": [
-                "High",
-                "Medium",
-                "High",
-                "Medium",
-                "High"
-            ],
-            "regulation_reference": [
-                "SAMA - الإفصاح والشفافية",
-                "SAMA - معالجة شكاوى العملاء",
-                "SAMA - حماية بيانات العملاء",
-                "SAMA - وضوح إجراءات الخدمة",
-                "SAMA - الإسناد الخارجي"
-            ],
-            "regulation_text": [
-                "يجب أن تكون الرسوم والشروط الجوهرية واضحة للعميل، وأن يتم إشعاره بالتغييرات المؤثرة قبل تطبيقها وفق المتطلبات التنظيمية ذات العلاقة.",
-                "ينبغي وجود آلية واضحة لاستقبال شكاوى العملاء ومعالجتها خلال مدة محددة، مع توثيق الشكوى وآلية التصعيد عند الحاجة.",
-                "يجب التعامل مع بيانات العملاء بسرية، وعدم مشاركتها مع أطراف خارجية إلا وفق ضوابط واضحة وموافقة أو أساس نظامي مناسب.",
-                "يجب أن تكون إجراءات إيقاف أو تعليق الخدمة واضحة ومبنية على أسباب محددة، مع إشعار العميل متى ما كان ذلك ممكنًا نظاميًا.",
-                "ينبغي أن تكون ترتيبات الإسناد الخارجي خاضعة لضوابط واضحة تضمن حماية البيانات واستمرارية الخدمة ومسؤولية الجهة المالية."
-            ],
-            "problem": [
-                "البند قد يسمح بتغيير الرسوم دون إشعار واضح للعميل.",
-                "لا يظهر وجود آلية واضحة لاستقبال ومعالجة شكاوى العملاء.",
-                "البند قد يسمح بمشاركة بيانات العميل مع أطراف خارجية دون ضوابط واضحة.",
-                "البند قد يمنح الشركة صلاحية إيقاف الخدمة دون سبب أو إشعار واضح.",
-                "غياب ضوابط واضحة عند الاستعانة بطرف خارجي قد يسبب خطرًا تنظيميًا."
-            ],
-            "consequence": [
-                "قد يؤدي إلى شكاوى عملاء أو إلزام الشركة بتعديل البند أو إجراء رقابي.",
-                "قد يؤدي إلى ضعف حماية العميل وتصعيد الشكاوى للجهات المختصة.",
-                "قد يؤدي إلى مخاطر خصوصية ومساءلة تنظيمية وفقدان ثقة العملاء.",
-                "قد يؤدي إلى شكاوى عملاء أو اعتبار البند غير متوازن.",
-                "قد يؤدي إلى مخاطر تشغيلية أو مساءلة تنظيمية عند فشل مزود الخدمة أو تسرب البيانات."
-            ],
-            "suggested_fix": [
-                "إشعار العميل قبل تغيير الرسوم بمدة واضحة مع توضيح آلية الاعتراض أو الإنهاء.",
-                "إضافة بند يوضح طريقة تقديم الشكاوى ومدة الرد وآلية التصعيد.",
-                "توضيح متى ولماذا تتم مشاركة البيانات ومع من، مع الالتزام بسياسة الخصوصية والمتطلبات النظامية.",
-                "تحديد حالات الإيقاف بوضوح مثل الاشتباه في احتيال أو مخالفة الشروط، مع إشعار العميل متى ما أمكن.",
-                "إضافة بند يحدد مسؤوليات مزود الخدمة، حماية البيانات، استمرارية الخدمة، وآلية الرقابة."
-            ]
-        }
-        return pd.DataFrame(data)
+    data = {
+        "topic": [
+            "الإفصاح عن الرسوم",
+            "شكاوى العملاء",
+            "مشاركة بيانات العميل",
+            "إيقاف الخدمة أو الحساب",
+            "الإسناد الخارجي"
+        ],
+        "risk_phrases": [
+            "دون إشعار,بدون إشعار,دون إبلاغ,بدون إبلاغ,تعديل الرسوم في أي وقت,تغيير الرسوم في أي وقت,دون الحاجة إلى موافقته",
+            "لا تتحمل الشركة مسؤولية استقبال أي شكوى,لا يوجد حق اعتراض,قبول نهائي بجميع قرارات الشركة,لا يحق للعميل الاعتراض,أي شكوى أو اعتراض أو تظلم",
+            "مشاركة البيانات مع طرف ثالث دون موافقة,مشاركة البيانات دون موافقة,دون توضيح أسباب المشاركة,دون موافقة منفصلة,مشاركة بيانات العميل مع طرف ثالث",
+            "إيقاف الخدمة دون توضيح السبب,تعليق الحساب دون إشعار,إغلاق الحساب دون إشعار,في أي وقت دون توضيح السبب,في أي وقت دون إشعار",
+            "إسناد خارجي دون ضوابط,تعهيد الخدمة دون التزام,مزود خارجي دون رقابة,دون توضيح ضوابط حماية البيانات,دون أي التزام إضافي"
+        ],
+        "risk_level": [
+            "High",
+            "Medium",
+            "High",
+            "Medium",
+            "High"
+        ],
+        "regulation_reference": [
+            "SAMA - الإفصاح والشفافية",
+            "SAMA - معالجة شكاوى العملاء",
+            "SAMA - حماية بيانات العملاء",
+            "SAMA - وضوح إجراءات الخدمة",
+            "SAMA - الإسناد الخارجي"
+        ],
+        "regulation_text": [
+            "يجب أن تكون الرسوم والشروط الجوهرية واضحة للعميل، وأن يتم إشعاره بالتغييرات المؤثرة قبل تطبيقها وفق المتطلبات التنظيمية ذات العلاقة.",
+            "ينبغي وجود آلية واضحة لاستقبال شكاوى العملاء ومعالجتها خلال مدة محددة، مع توثيق الشكوى وآلية التصعيد عند الحاجة.",
+            "يجب التعامل مع بيانات العملاء بسرية، وعدم مشاركتها مع أطراف خارجية إلا وفق ضوابط واضحة وموافقة أو أساس نظامي مناسب.",
+            "يجب أن تكون إجراءات إيقاف أو تعليق الخدمة واضحة ومبنية على أسباب محددة، مع إشعار العميل متى ما كان ذلك ممكنًا نظاميًا.",
+            "ينبغي أن تكون ترتيبات الإسناد الخارجي خاضعة لضوابط واضحة تضمن حماية البيانات واستمرارية الخدمة ومسؤولية الجهة المالية."
+        ],
+        "problem": [
+            "البند قد يسمح بتغيير الرسوم دون إشعار واضح للعميل.",
+            "البند قد يضعف حق العميل في تقديم الشكوى أو الاعتراض.",
+            "البند قد يسمح بمشاركة بيانات العميل مع أطراف خارجية دون ضوابط واضحة.",
+            "البند قد يمنح الشركة صلاحية إيقاف الخدمة أو الحساب دون سبب أو إشعار واضح.",
+            "غياب ضوابط واضحة عند الاستعانة بطرف خارجي قد يسبب خطرًا تنظيميًا وتشغيليًا."
+        ],
+        "consequence": [
+            "قد يؤدي إلى شكاوى عملاء أو إلزام الشركة بتعديل البند أو إجراء رقابي.",
+            "قد يؤدي إلى ضعف حماية العميل وتصعيد الشكاوى للجهات المختصة.",
+            "قد يؤدي إلى مخاطر خصوصية ومساءلة تنظيمية وفقدان ثقة العملاء.",
+            "قد يؤدي إلى شكاوى عملاء أو اعتبار البند غير متوازن.",
+            "قد يؤدي إلى مخاطر تشغيلية أو مساءلة تنظيمية عند فشل مزود الخدمة أو تسرب البيانات."
+        ],
+        "suggested_fix": [
+            "إضافة نص يلزم الشركة بإشعار العميل قبل تغيير الرسوم بمدة واضحة، مع توضيح حقه في الاعتراض أو إنهاء الخدمة.",
+            "إضافة بند يوضح طريقة تقديم الشكاوى، مدة الرد، آلية التوثيق، وآلية التصعيد عند الحاجة.",
+            "توضيح متى ولماذا تتم مشاركة البيانات ومع من، مع اشتراط وجود موافقة أو أساس نظامي مناسب.",
+            "تحديد حالات الإيقاف بوضوح مثل الاحتيال أو مخالفة الشروط أو المتطلبات النظامية، مع إشعار العميل متى ما أمكن.",
+            "إضافة بند يحدد مسؤوليات مزود الخدمة، حماية البيانات، استمرارية الخدمة، وآلية الرقابة والمتابعة."
+        ]
+    }
+
+    return pd.DataFrame(data)
 
 
 # =========================
-# قراءة الملفات
+# قراءة الملف
 # =========================
 
 def extract_text_from_file(uploaded_file):
@@ -212,16 +206,38 @@ def extract_text_from_file(uploaded_file):
         return uploaded_file.read().decode("utf-8", errors="ignore")
 
     if file_name.endswith(".pdf"):
-        text = ""
         file_bytes = uploaded_file.read()
         pdf = fitz.open(stream=file_bytes, filetype="pdf")
+        text = ""
 
         for page in pdf:
-            text += page.get_text()
+            text += page.get_text() + "\n"
 
         return text
 
     return ""
+
+
+# =========================
+# استخراج الجملة/البند من المستند
+# =========================
+
+def get_document_snippet(contract_text, phrase, window=170):
+    text_lower = contract_text.lower()
+    phrase_lower = phrase.lower()
+
+    index = text_lower.find(phrase_lower)
+
+    if index == -1:
+        return "لم يتمكن النظام من استخراج نص البند من المستند."
+
+    start = max(index - window, 0)
+    end = min(index + len(phrase) + window, len(contract_text))
+
+    snippet = contract_text[start:end].strip()
+    snippet = snippet.replace("\n", " ")
+
+    return snippet
 
 
 # =========================
@@ -234,20 +250,24 @@ def analyze_contract_against_sama(contract_text):
     contract_text_lower = contract_text.lower()
 
     for _, row in rules.iterrows():
-        keywords = str(row["keywords"]).split(",")
-        matched_keywords = []
+        phrases = str(row["risk_phrases"]).split(",")
+        matched_phrases = []
 
-        for keyword in keywords:
-            keyword = keyword.strip()
-            if keyword and keyword.lower() in contract_text_lower:
-                matched_keywords.append(keyword)
+        for phrase in phrases:
+            phrase = phrase.strip()
+            if phrase and phrase.lower() in contract_text_lower:
+                matched_phrases.append(phrase)
 
-        if matched_keywords:
+        if matched_phrases:
+            first_phrase = matched_phrases[0]
+            document_snippet = get_document_snippet(contract_text, first_phrase)
+
             results.append({
-                "authority": row["authority"],
+                "authority": "SAMA",
                 "topic": row["topic"],
                 "risk_level": row["risk_level"],
-                "matched_keywords": "، ".join(matched_keywords),
+                "matched_phrases": "، ".join(matched_phrases),
+                "document_snippet": document_snippet,
                 "regulation_reference": row["regulation_reference"],
                 "regulation_text": row["regulation_text"],
                 "problem": row["problem"],
@@ -261,235 +281,296 @@ def analyze_contract_against_sama(contract_text):
 def calculate_scores(results):
     high_count = sum(1 for item in results if item["risk_level"] == "High")
     medium_count = sum(1 for item in results if item["risk_level"] == "Medium")
-    low_count = sum(1 for item in results if item["risk_level"] == "Low")
 
-    risk_score = min((high_count * 25) + (medium_count * 12) + (low_count * 5), 100)
+    risk_score = min((high_count * 25) + (medium_count * 12), 100)
     compliance_score = max(100 - risk_score, 0)
 
-    return risk_score, compliance_score, high_count, medium_count, low_count
+    return risk_score, compliance_score, high_count, medium_count
 
 
 def get_final_message(risk_score, results_count):
     if results_count == 0:
-        return "ملفك سليم بناءً على قاعدة البيانات الحالية، ولم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA.", "success"
+        return "لم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA بناءً على قاعدة بيانات الديمو الحالية.", "success"
 
     if risk_score >= 75:
-        return "ملفك عالي الخطورة ويحتوي على بنود لا تتماشى مع متطلبات SAMA. ينصح بعدم اعتماده قبل المراجعة والتعديل.", "error"
+        return "المستند عالي الخطورة ويحتوي على بنود لا تتماشى مع متطلبات SAMA. ينصح بعدم اعتماده قبل المراجعة والتعديل.", "error"
 
     if risk_score >= 40:
-        return "ملفك يحتوي على مخاطر متوسطة مرتبطة بمتطلبات SAMA. يفضل تعديل البنود المشار إليها قبل الاعتماد.", "warning"
+        return "المستند يحتوي على مخاطر متوسطة مرتبطة بمتطلبات SAMA. يفضل تعديل البنود المشار إليها قبل الاعتماد.", "warning"
 
-    return "ملفك يحتوي على ملاحظات بسيطة، ويحتاج مراجعة نهائية حسب حساسية المستند.", "info"
+    return "المستند يحتوي على ملاحظات محدودة، ويحتاج مراجعة نهائية حسب حساسية المستند.", "info"
 
 
 # =========================
-# PDF
+# إنشاء PDF واضح بالعربي
 # =========================
 
-def setup_pdf_font():
+def safe_html(text):
+    return html.escape(str(text))
+
+
+def add_html_page(doc, body_html):
+    page = doc.new_page(width=595, height=842)  # A4
+    rect = fitz.Rect(40, 40, 555, 802)
+
+    full_html = f"""
+    <html>
+    <body dir="rtl">
+        <div class="page">
+            {body_html}
+        </div>
+    </body>
+    </html>
     """
-    يحاول استخدام خط يدعم العربية داخل بيئة Streamlit.
+
+    css = """
+    body {
+        direction: rtl;
+        font-family: sans-serif;
+        color: #0f172a;
+        line-height: 1.7;
+        font-size: 13px;
+    }
+
+    h1 {
+        color: #1e3a8a;
+        font-size: 24px;
+        text-align: center;
+        margin-bottom: 16px;
+    }
+
+    h2 {
+        color: #1e40af;
+        font-size: 17px;
+        margin-top: 12px;
+        margin-bottom: 8px;
+    }
+
+    h3 {
+        color: #0f172a;
+        font-size: 14px;
+        margin-top: 10px;
+        margin-bottom: 4px;
+    }
+
+    p {
+        margin: 5px 0;
+    }
+
+    .summary {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 14px;
+    }
+
+    .safe {
+        background: #ecfdf5;
+        border: 1px solid #86efac;
+        border-radius: 12px;
+        padding: 14px;
+        margin-top: 12px;
+    }
+
+    .issue {
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 12px;
+    }
+
+    .reg {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 8px;
+    }
+
+    .problem {
+        background: #fef3c7;
+        border: 1px solid #fcd34d;
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 8px;
+    }
+
+    .danger {
+        background: #fee2e2;
+        border: 1px solid #fca5a5;
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 8px;
+    }
+
+    .fix {
+        background: #dcfce7;
+        border: 1px solid #86efac;
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 8px;
+    }
+
+    .footer {
+        color: #475569;
+        font-size: 11px;
+        margin-top: 20px;
+        border-top: 1px solid #cbd5e1;
+        padding-top: 10px;
+    }
     """
-    possible_fonts = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf",
-        "DejaVuSans.ttf"
-    ]
 
-    for font_path in possible_fonts:
-        if os.path.exists(font_path):
-            pdfmetrics.registerFont(TTFont("ArabicFont", font_path))
-            return "ArabicFont"
-
-    return "Helvetica"
-
-
-def ar_text(text):
-    text = str(text)
-    try:
-        reshaped_text = arabic_reshaper.reshape(text)
-        bidi_text = get_display(reshaped_text)
-        return bidi_text
-    except Exception:
-        return text
+    page.insert_htmlbox(rect, full_html, css=css)
 
 
 def create_pdf_report(results, risk_score, compliance_score, high_count, medium_count, final_message):
-    buffer = BytesIO()
-    font_name = setup_pdf_font()
+    doc = fitz.open()
 
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=40,
-        leftMargin=40,
-        topMargin=40,
-        bottomMargin=40
-    )
+    summary_html = f"""
+    <h1>تقرير فحص الامتثال مقابل متطلبات SAMA</h1>
 
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle(
-        "ArabicTitle",
-        parent=styles["Title"],
-        alignment=TA_CENTER,
-        fontName=font_name,
-        fontSize=20,
-        leading=28,
-        textColor=colors.HexColor("#0F172A")
-    )
-
-    heading_style = ParagraphStyle(
-        "ArabicHeading",
-        parent=styles["Heading2"],
-        alignment=TA_RIGHT,
-        fontName=font_name,
-        fontSize=14,
-        leading=22,
-        textColor=colors.HexColor("#1E3A8A")
-    )
-
-    normal_style = ParagraphStyle(
-        "ArabicNormal",
-        parent=styles["Normal"],
-        alignment=TA_RIGHT,
-        fontName=font_name,
-        fontSize=10,
-        leading=17
-    )
-
-    small_style = ParagraphStyle(
-        "ArabicSmall",
-        parent=styles["Normal"],
-        alignment=TA_RIGHT,
-        fontName=font_name,
-        fontSize=9,
-        leading=15,
-        textColor=colors.HexColor("#334155")
-    )
-
-    story = []
-
-    story.append(Paragraph(ar_text("تقرير فحص الامتثال مقابل متطلبات SAMA"), title_style))
-    story.append(Spacer(1, 12))
-
-    story.append(Paragraph(ar_text("ملخص الفحص"), heading_style))
-    story.append(Paragraph(ar_text(f"مصدر المطابقة: البنك المركزي السعودي SAMA"), normal_style))
-    story.append(Paragraph(ar_text(f"نسبة الخطورة: {risk_score}%"), normal_style))
-    story.append(Paragraph(ar_text(f"درجة الامتثال: {compliance_score}/100"), normal_style))
-    story.append(Paragraph(ar_text(f"عدد المخاطر العالية: {high_count}"), normal_style))
-    story.append(Paragraph(ar_text(f"عدد المخاطر المتوسطة: {medium_count}"), normal_style))
-    story.append(Paragraph(ar_text(f"النتيجة النهائية: {final_message}"), normal_style))
-    story.append(Spacer(1, 18))
+    <div class="summary">
+        <p><b>المنصة:</b> ممتثل</p>
+        <p><b>مصدر المطابقة:</b> البنك المركزي السعودي SAMA</p>
+        <p><b>نسبة الخطورة:</b> {risk_score}%</p>
+        <p><b>درجة الامتثال:</b> {compliance_score}/100</p>
+        <p><b>عدد المخاطر العالية:</b> {high_count}</p>
+        <p><b>عدد المخاطر المتوسطة:</b> {medium_count}</p>
+        <p><b>النتيجة النهائية:</b> {safe_html(final_message)}</p>
+    </div>
+    """
 
     if not results:
-        story.append(Paragraph(ar_text("حالة المستند"), heading_style))
-        story.append(Paragraph(ar_text("لم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA بناءً على قاعدة البيانات الحالية."), normal_style))
-        story.append(Spacer(1, 12))
+        summary_html += """
+        <div class="safe">
+            <h2>حالة المستند</h2>
+            <p>لم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA بناءً على قاعدة بيانات الديمو الحالية.</p>
+        </div>
+        """
     else:
-        story.append(Paragraph(ar_text("البنود التي لا تتماشى مع متطلبات SAMA"), heading_style))
-        story.append(Spacer(1, 8))
+        summary_html += """
+        <h2>البنود التي لا تتماشى مع متطلبات SAMA</h2>
+        <p>يحتوي هذا التقرير على كل بند تم اكتشافه، والنص التنظيمي المرتبط به، والمشكلة، والعواقب، والإجراء المقترح.</p>
+        """
 
-        for i, item in enumerate(results, start=1):
-            story.append(Paragraph(ar_text(f"الخطر رقم {i}: {item['topic']}"), heading_style))
-            story.append(Paragraph(ar_text(f"مستوى الخطورة: {item['risk_level']}"), normal_style))
-            story.append(Paragraph(ar_text(f"الكلمات المكتشفة في المستند: {item['matched_keywords']}"), normal_style))
-            story.append(Spacer(1, 6))
+    summary_html += """
+    <div class="footer">
+        هذا التقرير يمثل فحص امتثال أولي آلي لأغراض الديمو، ولا يعد رأيًا قانونيًا نهائيًا.
+        يجب مراجعته من مختص قانوني أو مسؤول امتثال قبل الاعتماد.
+    </div>
+    """
 
-            story.append(Paragraph(ar_text("المرجع التنظيمي المرتبط:"), normal_style))
-            story.append(Paragraph(ar_text(item["regulation_reference"]), small_style))
-            story.append(Spacer(1, 4))
+    add_html_page(doc, summary_html)
 
-            story.append(Paragraph(ar_text("نص المتطلب التنظيمي المرتبط:"), normal_style))
-            story.append(Paragraph(ar_text(item["regulation_text"]), small_style))
-            story.append(Spacer(1, 6))
+    for i, item in enumerate(results, start=1):
+        issue_html = f"""
+        <h1>تفصيل الخطر رقم {i}</h1>
 
-            story.append(Paragraph(ar_text("المشكلة:"), normal_style))
-            story.append(Paragraph(ar_text(item["problem"]), small_style))
-            story.append(Spacer(1, 6))
+        <div class="issue">
+            <h2>{safe_html(item["topic"])}</h2>
+            <p><b>الجهة المرتبطة:</b> SAMA</p>
+            <p><b>مستوى الخطورة:</b> {safe_html(item["risk_level"])}</p>
+            <p><b>العبارات الخطرة المكتشفة:</b> {safe_html(item["matched_phrases"])}</p>
+        </div>
 
-            story.append(Paragraph(ar_text("العواقب المحتملة:"), normal_style))
-            story.append(Paragraph(ar_text(item["consequence"]), small_style))
-            story.append(Spacer(1, 6))
+        <h2>النص الموجود في المستند</h2>
+        <div class="problem">
+            <p>{safe_html(item["document_snippet"])}</p>
+        </div>
 
-            story.append(Paragraph(ar_text("الإجراء المقترح:"), normal_style))
-            story.append(Paragraph(ar_text(item["suggested_fix"]), small_style))
-            story.append(Spacer(1, 14))
+        <h2>المرجع التنظيمي المرتبط</h2>
+        <div class="reg">
+            <p><b>{safe_html(item["regulation_reference"])}</b></p>
+            <p>{safe_html(item["regulation_text"])}</p>
+        </div>
 
-    story.append(Spacer(1, 16))
-    story.append(Paragraph(ar_text("تنبيه مهم"), heading_style))
-    story.append(Paragraph(
-        ar_text("هذا التقرير يمثل فحص امتثال أولي آلي، ولا يعد رأيًا قانونيًا نهائيًا. يجب مراجعته من مختص قانوني أو مسؤول امتثال قبل الاعتماد."),
-        small_style
-    ))
+        <h2>المشكلة</h2>
+        <div class="problem">
+            <p>{safe_html(item["problem"])}</p>
+        </div>
 
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
+        <h2>العواقب المحتملة</h2>
+        <div class="danger">
+            <p>{safe_html(item["consequence"])}</p>
+        </div>
+
+        <h2>الإجراء المقترح</h2>
+        <div class="fix">
+            <p>{safe_html(item["suggested_fix"])}</p>
+        </div>
+
+        <div class="footer">
+            هذا التقرير يمثل فحص امتثال أولي آلي، ولا يعد رأيًا قانونيًا نهائيًا.
+        </div>
+        """
+
+        add_html_page(doc, issue_html)
+
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    return BytesIO(pdf_bytes)
 
 
 # =========================
-# واجهة المستخدم
+# الواجهة
 # =========================
 
 st.markdown("""
 <div class="main-card">
     <h1>ممتثل</h1>
     <p>
-    افحص عقدك أو سياستك مقابل متطلبات البنك المركزي السعودي SAMA.
-    ارفع الملف، واضغط فحص، وسيظهر لك تقرير يوضح البنود غير المتوافقة
-    ونص المتطلب التنظيمي المرتبط بها.
+    ارفع عقد أو سياسة، وسيقوم ممتثل بفحصها مقابل متطلبات البنك المركزي السعودي SAMA.
+    النتيجة تعرض البنود عالية الخطورة، والنص التنظيمي المرتبط بها، مع تقرير PDF واضح.
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-st.info("نطاق الديمو الحالي: الفحص مقابل متطلبات البنك المركزي السعودي SAMA فقط.")
+st.markdown("""
+<div class="note-box">
+نطاق الديمو الحالي: البنك المركزي السعودي SAMA فقط.
+</div>
+""", unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader(
-    "ارفع ملف العقد أو السياسة",
-    type=["txt", "pdf"]
+    "ارفع ملف PDF أو TXT",
+    type=["pdf", "txt"]
 )
 
-show_text = st.checkbox("عرض النص المستخرج من الملف للتأكد", value=False)
+show_text = st.checkbox("عرض النص المستخرج من الملف", value=False)
 
-analyze = st.button("ابدأ الفحص")
+analyze_button = st.button("ابدأ الفحص")
 
 
-# =========================
-# النتائج
-# =========================
+if analyze_button and not uploaded_file:
+    st.warning("ارفع ملف PDF أو TXT أولًا.")
 
-if analyze and not uploaded_file:
-    st.warning("ارفع ملف TXT أو PDF أولًا عشان يبدأ الفحص.")
-
-if uploaded_file and analyze:
+if uploaded_file and analyze_button:
     contract_text = extract_text_from_file(uploaded_file)
 
-    if show_text:
-        st.text_area("النص المستخرج من الملف", contract_text, height=220)
-
     if not contract_text.strip():
-        st.error("لم يتمكن النظام من قراءة النص من الملف. جرّب ملف TXT أو PDF يحتوي على نص قابل للنسخ.")
+        st.error("لم يتمكن النظام من قراءة النص من الملف. جرّب ملف PDF يحتوي على نص قابل للنسخ أو ملف TXT.")
     else:
+        if show_text:
+            st.text_area("النص المستخرج", contract_text, height=220)
+
         results = analyze_contract_against_sama(contract_text)
-        risk_score, compliance_score, high_count, medium_count, low_count = calculate_scores(results)
+        risk_score, compliance_score, high_count, medium_count = calculate_scores(results)
         final_message, message_type = get_final_message(risk_score, len(results))
 
-        st.markdown("""
-        <div class="result-card">
-            <h2>نتيجة الفحص</h2>
-        </div>
-        """, unsafe_allow_html=True)
+        st.subheader("نتيجة الفحص")
 
-        c1, c2, c3 = st.columns(3)
+        col1, col2, col3 = st.columns(3)
 
-        with c1:
+        with col1:
             st.metric("نسبة الخطورة", f"{risk_score}%")
 
-        with c2:
+        with col2:
             st.metric("درجة الامتثال", f"{compliance_score}/100")
 
-        with c3:
+        with col3:
             st.metric("عدد المخاطر", len(results))
 
         if message_type == "success":
@@ -520,46 +601,50 @@ if uploaded_file and analyze:
         if not results:
             st.markdown("""
             <div class="green-box">
-            لم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA بناءً على قاعدة البيانات الحالية.
-            هذه النتيجة لا تعتبر رأيًا قانونيًا نهائيًا.
+                لم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA بناءً على قاعدة بيانات الديمو الحالية.
             </div>
             """, unsafe_allow_html=True)
+
         else:
-            st.subheader("البنود غير المتوافقة مع متطلبات SAMA")
+            st.subheader("البنود غير المتوافقة")
 
             for i, item in enumerate(results, start=1):
                 with st.expander(f"الخطر رقم {i}: {item['topic']} - {item['risk_level']}"):
-                    st.write("الكلمات المكتشفة:", item["matched_keywords"])
-
-                    st.markdown("**المرجع التنظيمي المرتبط:**")
-                    st.info(item["regulation_reference"])
+                    st.markdown(f"""
+                    <div class="yellow-box">
+                        <b>النص الموجود في المستند:</b><br>
+                        {item["document_snippet"]}
+                    </div>
+                    """, unsafe_allow_html=True)
 
                     st.markdown(f"""
                     <div class="blue-box">
-                    <b>نص المتطلب التنظيمي:</b><br>
-                    {item["regulation_text"]}
+                        <b>المرجع التنظيمي المرتبط:</b><br>
+                        {item["regulation_reference"]}<br><br>
+                        <b>نص المتطلب التنظيمي:</b><br>
+                        {item["regulation_text"]}
                     </div>
                     """, unsafe_allow_html=True)
 
                     st.markdown(f"""
                     <div class="yellow-box">
-                    <b>المشكلة:</b><br>
-                    {item["problem"]}
+                        <b>المشكلة:</b><br>
+                        {item["problem"]}
                     </div>
                     """, unsafe_allow_html=True)
 
                     st.markdown(f"""
                     <div class="red-box">
-                    <b>العواقب المحتملة:</b><br>
-                    {item["consequence"]}
+                        <b>العواقب المحتملة:</b><br>
+                        {item["consequence"]}
                     </div>
                     """, unsafe_allow_html=True)
 
                     st.markdown(f"""
                     <div class="green-box">
-                    <b>الإجراء المقترح:</b><br>
-                    {item["suggested_fix"]}
+                        <b>الإجراء المقترح:</b><br>
+                        {item["suggested_fix"]}
                     </div>
                     """, unsafe_allow_html=True)
 
-        st.caption("ملاحظة: النصوص التنظيمية في نسخة الديمو صياغات مبسطة لأغراض الاختبار، ويمكن لاحقًا استبدالها بنصوص رسمية من SAMA Rulebook.")
+st.caption("تنبيه: النصوص التنظيمية في الديمو صياغات مبسطة لأغراض الاختبار، ويمكن لاحقًا استبدالها بنصوص رسمية معتمدة من SAMA.")
