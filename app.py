@@ -1,15 +1,31 @@
+import os
+from io import BytesIO
+
 import streamlit as st
 import pandas as pd
 import fitz  # PyMuPDF
 
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_RIGHT, TA_CENTER
+from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+import arabic_reshaper
+from bidi.algorithm import get_display
+
+
 st.set_page_config(
     page_title="ممتثل",
     page_icon="⚖️",
-    layout="wide"
+    layout="centered"
 )
 
+
 # =========================
-# STYLE
+# تصميم بسيط
 # =========================
 
 st.markdown("""
@@ -20,22 +36,22 @@ st.markdown("""
 }
 
 .block-container {
-    max-width: 1050px;
+    max-width: 900px;
     padding-top: 2rem;
 }
 
 .main-card {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.16);
-    border-radius: 26px;
-    padding: 34px;
+    border-radius: 24px;
+    padding: 32px;
     margin-bottom: 22px;
 }
 
 .main-card h1 {
-    font-size: 52px;
     color: white;
-    margin-bottom: 6px;
+    font-size: 48px;
+    margin-bottom: 8px;
 }
 
 .main-card p {
@@ -73,6 +89,13 @@ st.markdown("""
     padding: 16px;
 }
 
+.blue-box {
+    background: rgba(37,99,235,0.14);
+    border: 1px solid rgba(96,165,250,0.4);
+    border-radius: 16px;
+    padding: 16px;
+}
+
 .stButton > button {
     width: 100%;
     height: 55px;
@@ -83,64 +106,104 @@ st.markdown("""
     font-size: 18px;
     font-weight: bold;
 }
+
+.stDownloadButton > button {
+    width: 100%;
+    height: 50px;
+    border-radius: 14px;
+    background: #16A34A;
+    color: white;
+    border: none;
+    font-size: 16px;
+    font-weight: bold;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
 # =========================
-# DATA
+# بيانات SAMA التجريبية
 # =========================
 
-def load_regulations():
+def load_sama_rules():
+    """
+    إذا كان عندك ملف sama_rules.csv سيقرأه.
+    إذا ما كان موجود، يستخدم داتا تجريبية مدمجة.
+    """
     try:
-        return pd.read_csv("regulations.csv")
+        return pd.read_csv("sama_rules.csv")
     except Exception:
         data = {
-            "authority": ["SAMA", "SAMA", "SAMA", "SAMA", "CMA", "Internal"],
+            "authority": [
+                "SAMA",
+                "SAMA",
+                "SAMA",
+                "SAMA",
+                "SAMA"
+            ],
             "topic": [
                 "الإفصاح عن الرسوم",
                 "شكاوى العملاء",
-                "مشاركة البيانات",
-                "إيقاف الخدمة",
-                "تضارب المصالح",
-                "سياسة الشركة الداخلية"
+                "مشاركة بيانات العميل",
+                "إيقاف الخدمة أو الحساب",
+                "الإسناد الخارجي"
             ],
             "keywords": [
                 "رسوم,تعديل الرسوم,تغيير الرسوم,بدون إشعار,دون إشعار",
                 "شكوى,شكاوى,اعتراض,تظلم,خدمة العملاء",
                 "بيانات,مشاركة البيانات,طرف ثالث,مزود خدمة,خصوصية",
                 "إيقاف الخدمة,تعليق الحساب,إغلاق الحساب,حظر",
-                "تضارب المصالح,مصالح,إفصاح,استثمار,مستثمر",
-                "اعتماد,موافقة,صلاحية,تفويض"
+                "إسناد خارجي,مزود خارجي,طرف خارجي,تعهيد,مزود خدمة"
             ],
-            "risk_level": ["High", "Medium", "High", "Medium", "High", "Medium"],
+            "risk_level": [
+                "High",
+                "Medium",
+                "High",
+                "Medium",
+                "High"
+            ],
+            "regulation_reference": [
+                "SAMA - الإفصاح والشفافية",
+                "SAMA - معالجة شكاوى العملاء",
+                "SAMA - حماية بيانات العملاء",
+                "SAMA - وضوح إجراءات الخدمة",
+                "SAMA - الإسناد الخارجي"
+            ],
+            "regulation_text": [
+                "يجب أن تكون الرسوم والشروط الجوهرية واضحة للعميل، وأن يتم إشعاره بالتغييرات المؤثرة قبل تطبيقها وفق المتطلبات التنظيمية ذات العلاقة.",
+                "ينبغي وجود آلية واضحة لاستقبال شكاوى العملاء ومعالجتها خلال مدة محددة، مع توثيق الشكوى وآلية التصعيد عند الحاجة.",
+                "يجب التعامل مع بيانات العملاء بسرية، وعدم مشاركتها مع أطراف خارجية إلا وفق ضوابط واضحة وموافقة أو أساس نظامي مناسب.",
+                "يجب أن تكون إجراءات إيقاف أو تعليق الخدمة واضحة ومبنية على أسباب محددة، مع إشعار العميل متى ما كان ذلك ممكنًا نظاميًا.",
+                "ينبغي أن تكون ترتيبات الإسناد الخارجي خاضعة لضوابط واضحة تضمن حماية البيانات واستمرارية الخدمة ومسؤولية الجهة المالية."
+            ],
             "problem": [
                 "البند قد يسمح بتغيير الرسوم دون إشعار واضح للعميل.",
                 "لا يظهر وجود آلية واضحة لاستقبال ومعالجة شكاوى العملاء.",
                 "البند قد يسمح بمشاركة بيانات العميل مع أطراف خارجية دون ضوابط واضحة.",
                 "البند قد يمنح الشركة صلاحية إيقاف الخدمة دون سبب أو إشعار واضح.",
-                "قد لا يكون هناك إفصاح كاف عن تضارب المصالح في الخدمات الاستثمارية.",
-                "العقد قد لا يوضح من يملك صلاحية الموافقة أو الاعتماد داخليا."
+                "غياب ضوابط واضحة عند الاستعانة بطرف خارجي قد يسبب خطرًا تنظيميًا."
             ],
             "consequence": [
                 "قد يؤدي إلى شكاوى عملاء أو إلزام الشركة بتعديل البند أو إجراء رقابي.",
                 "قد يؤدي إلى ضعف حماية العميل وتصعيد الشكاوى للجهات المختصة.",
                 "قد يؤدي إلى مخاطر خصوصية ومساءلة تنظيمية وفقدان ثقة العملاء.",
                 "قد يؤدي إلى شكاوى عملاء أو اعتبار البند غير متوازن.",
-                "قد يؤدي إلى مخاطر تنظيمية مرتبطة بحماية المستثمر والإفصاح.",
-                "قد يخالف سياسات الشركة الداخلية أو يسبب ضعفا في الحوكمة."
+                "قد يؤدي إلى مخاطر تشغيلية أو مساءلة تنظيمية عند فشل مزود الخدمة أو تسرب البيانات."
             ],
             "suggested_fix": [
                 "إشعار العميل قبل تغيير الرسوم بمدة واضحة مع توضيح آلية الاعتراض أو الإنهاء.",
                 "إضافة بند يوضح طريقة تقديم الشكاوى ومدة الرد وآلية التصعيد.",
-                "توضيح متى ولماذا تتم مشاركة البيانات ومع من، مع الالتزام بسياسة الخصوصية.",
-                "تحديد حالات الإيقاف بوضوح مع إشعار العميل متى ما أمكن.",
-                "إضافة بند يشرح حالات تضارب المصالح وكيفية إدارتها والإفصاح عنها.",
-                "تحديد صلاحيات الاعتماد والمراجعة الداخلية قبل توقيع العقد."
+                "توضيح متى ولماذا تتم مشاركة البيانات ومع من، مع الالتزام بسياسة الخصوصية والمتطلبات النظامية.",
+                "تحديد حالات الإيقاف بوضوح مثل الاشتباه في احتيال أو مخالفة الشروط، مع إشعار العميل متى ما أمكن.",
+                "إضافة بند يحدد مسؤوليات مزود الخدمة، حماية البيانات، استمرارية الخدمة، وآلية الرقابة."
             ]
         }
         return pd.DataFrame(data)
 
+
+# =========================
+# قراءة الملفات
+# =========================
 
 def extract_text_from_file(uploaded_file):
     file_name = uploaded_file.name.lower()
@@ -152,31 +215,26 @@ def extract_text_from_file(uploaded_file):
         text = ""
         file_bytes = uploaded_file.read()
         pdf = fitz.open(stream=file_bytes, filetype="pdf")
+
         for page in pdf:
             text += page.get_text()
+
         return text
 
     return ""
 
 
-def analyze_contract(contract_text, match_source):
-    regulations = load_regulations()
+# =========================
+# التحليل
+# =========================
+
+def analyze_contract_against_sama(contract_text):
+    rules = load_sama_rules()
     results = []
     contract_text_lower = contract_text.lower()
 
-    for _, row in regulations.iterrows():
-        authority = str(row["authority"])
+    for _, row in rules.iterrows():
         keywords = str(row["keywords"]).split(",")
-
-        if match_source == "سياسات الشركة الداخلية فقط" and authority != "Internal":
-            continue
-
-        if match_source == "لوائح SAMA فقط" and authority != "SAMA":
-            continue
-
-        if match_source == "لوائح CMA فقط" and authority != "CMA":
-            continue
-
         matched_keywords = []
 
         for keyword in keywords:
@@ -190,6 +248,8 @@ def analyze_contract(contract_text, match_source):
                 "topic": row["topic"],
                 "risk_level": row["risk_level"],
                 "matched_keywords": "، ".join(matched_keywords),
+                "regulation_reference": row["regulation_reference"],
+                "regulation_text": row["regulation_text"],
                 "problem": row["problem"],
                 "consequence": row["consequence"],
                 "suggested_fix": row["suggested_fix"]
@@ -211,110 +271,207 @@ def calculate_scores(results):
 
 def get_final_message(risk_score, results_count):
     if results_count == 0:
-        return "ملفك سليم بناء على قاعدة البيانات الحالية، ولم يتم اكتشاف مخاطر واضحة.", "success"
+        return "ملفك سليم بناءً على قاعدة البيانات الحالية، ولم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA.", "success"
 
     if risk_score >= 75:
-        return "ملفك عالي الخطورة ويحتاج مراجعة قانونية وامتثالية قبل الاعتماد.", "error"
+        return "ملفك عالي الخطورة ويحتوي على بنود لا تتماشى مع متطلبات SAMA. ينصح بعدم اعتماده قبل المراجعة والتعديل.", "error"
 
     if risk_score >= 40:
-        return "ملفك يحتوي على مخاطر متوسطة، ويحتاج تعديل بعض البنود قبل الاعتماد.", "warning"
+        return "ملفك يحتوي على مخاطر متوسطة مرتبطة بمتطلبات SAMA. يفضل تعديل البنود المشار إليها قبل الاعتماد.", "warning"
 
-    return "ملفك يحتوي على ملاحظات بسيطة، لكنه قريب من الوضع المقبول بعد مراجعة نهائية.", "info"
+    return "ملفك يحتوي على ملاحظات بسيطة، ويحتاج مراجعة نهائية حسب حساسية المستند.", "info"
 
 
 # =========================
-# SIDEBAR
+# PDF
 # =========================
 
-with st.sidebar:
-    st.title("إعدادات إضافية")
+def setup_pdf_font():
+    """
+    يحاول استخدام خط يدعم العربية داخل بيئة Streamlit.
+    """
+    possible_fonts = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf",
+        "DejaVuSans.ttf"
+    ]
 
-    review_mode = st.selectbox(
-        "وضعية قراءة العقد",
-        [
-            "قراءة عامة",
-            "قراءة كجهة رقابية SAMA",
-            "قراءة كجهة رقابية CMA",
-            "قراءة كعميل متضرر",
-            "قراءة كمسؤول امتثال داخلي",
-            "قراءة كمراجع قانوني",
-            "محاكاة هجوم تنظيمي"
-        ]
+    for font_path in possible_fonts:
+        if os.path.exists(font_path):
+            pdfmetrics.registerFont(TTFont("ArabicFont", font_path))
+            return "ArabicFont"
+
+    return "Helvetica"
+
+
+def ar_text(text):
+    text = str(text)
+    try:
+        reshaped_text = arabic_reshaper.reshape(text)
+        bidi_text = get_display(reshaped_text)
+        return bidi_text
+    except Exception:
+        return text
+
+
+def create_pdf_report(results, risk_score, compliance_score, high_count, medium_count, final_message):
+    buffer = BytesIO()
+    font_name = setup_pdf_font()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40
     )
 
-    risk_appetite = st.radio(
-        "شهية المخاطر",
-        [
-            "محافظ",
-            "متوازن",
-            "مرتفع"
-        ]
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "ArabicTitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        fontName=font_name,
+        fontSize=20,
+        leading=28,
+        textColor=colors.HexColor("#0F172A")
     )
 
-    confidential_mode = st.checkbox("وضع المراجعة السرية")
-    show_extracted_text = st.checkbox("عرض النص المستخرج")
+    heading_style = ParagraphStyle(
+        "ArabicHeading",
+        parent=styles["Heading2"],
+        alignment=TA_RIGHT,
+        fontName=font_name,
+        fontSize=14,
+        leading=22,
+        textColor=colors.HexColor("#1E3A8A")
+    )
 
-    st.divider()
+    normal_style = ParagraphStyle(
+        "ArabicNormal",
+        parent=styles["Normal"],
+        alignment=TA_RIGHT,
+        fontName=font_name,
+        fontSize=10,
+        leading=17
+    )
 
-    st.markdown("""
-    **ممتثل** يفحص العقود والسياسات ويكشف:
-    
-    - البنود الخطرة  
-    - البنود الناقصة  
-    - العواقب المحتملة  
-    - الإجراء المقترح  
-    - نسبة الخطورة  
-    """)
+    small_style = ParagraphStyle(
+        "ArabicSmall",
+        parent=styles["Normal"],
+        alignment=TA_RIGHT,
+        fontName=font_name,
+        fontSize=9,
+        leading=15,
+        textColor=colors.HexColor("#334155")
+    )
+
+    story = []
+
+    story.append(Paragraph(ar_text("تقرير فحص الامتثال مقابل متطلبات SAMA"), title_style))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph(ar_text("ملخص الفحص"), heading_style))
+    story.append(Paragraph(ar_text(f"مصدر المطابقة: البنك المركزي السعودي SAMA"), normal_style))
+    story.append(Paragraph(ar_text(f"نسبة الخطورة: {risk_score}%"), normal_style))
+    story.append(Paragraph(ar_text(f"درجة الامتثال: {compliance_score}/100"), normal_style))
+    story.append(Paragraph(ar_text(f"عدد المخاطر العالية: {high_count}"), normal_style))
+    story.append(Paragraph(ar_text(f"عدد المخاطر المتوسطة: {medium_count}"), normal_style))
+    story.append(Paragraph(ar_text(f"النتيجة النهائية: {final_message}"), normal_style))
+    story.append(Spacer(1, 18))
+
+    if not results:
+        story.append(Paragraph(ar_text("حالة المستند"), heading_style))
+        story.append(Paragraph(ar_text("لم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA بناءً على قاعدة البيانات الحالية."), normal_style))
+        story.append(Spacer(1, 12))
+    else:
+        story.append(Paragraph(ar_text("البنود التي لا تتماشى مع متطلبات SAMA"), heading_style))
+        story.append(Spacer(1, 8))
+
+        for i, item in enumerate(results, start=1):
+            story.append(Paragraph(ar_text(f"الخطر رقم {i}: {item['topic']}"), heading_style))
+            story.append(Paragraph(ar_text(f"مستوى الخطورة: {item['risk_level']}"), normal_style))
+            story.append(Paragraph(ar_text(f"الكلمات المكتشفة في المستند: {item['matched_keywords']}"), normal_style))
+            story.append(Spacer(1, 6))
+
+            story.append(Paragraph(ar_text("المرجع التنظيمي المرتبط:"), normal_style))
+            story.append(Paragraph(ar_text(item["regulation_reference"]), small_style))
+            story.append(Spacer(1, 4))
+
+            story.append(Paragraph(ar_text("نص المتطلب التنظيمي المرتبط:"), normal_style))
+            story.append(Paragraph(ar_text(item["regulation_text"]), small_style))
+            story.append(Spacer(1, 6))
+
+            story.append(Paragraph(ar_text("المشكلة:"), normal_style))
+            story.append(Paragraph(ar_text(item["problem"]), small_style))
+            story.append(Spacer(1, 6))
+
+            story.append(Paragraph(ar_text("العواقب المحتملة:"), normal_style))
+            story.append(Paragraph(ar_text(item["consequence"]), small_style))
+            story.append(Spacer(1, 6))
+
+            story.append(Paragraph(ar_text("الإجراء المقترح:"), normal_style))
+            story.append(Paragraph(ar_text(item["suggested_fix"]), small_style))
+            story.append(Spacer(1, 14))
+
+    story.append(Spacer(1, 16))
+    story.append(Paragraph(ar_text("تنبيه مهم"), heading_style))
+    story.append(Paragraph(
+        ar_text("هذا التقرير يمثل فحص امتثال أولي آلي، ولا يعد رأيًا قانونيًا نهائيًا. يجب مراجعته من مختص قانوني أو مسؤول امتثال قبل الاعتماد."),
+        small_style
+    ))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 
 # =========================
-# MAIN PAGE
+# واجهة المستخدم
 # =========================
 
 st.markdown("""
 <div class="main-card">
     <h1>ممتثل</h1>
     <p>
-    منصة بسيطة لفحص امتثال العقود والسياسات. ارفع ملفك، اختر مصدر المطابقة،
-    ثم احصل على نتيجة مختصرة توضح نسبة الخطورة والملاحظات الأساسية.
+    افحص عقدك أو سياستك مقابل متطلبات البنك المركزي السعودي SAMA.
+    ارفع الملف، واضغط فحص، وسيظهر لك تقرير يوضح البنود غير المتوافقة
+    ونص المتطلب التنظيمي المرتبط بها.
     </p>
 </div>
 """, unsafe_allow_html=True)
+
+st.info("نطاق الديمو الحالي: الفحص مقابل متطلبات البنك المركزي السعودي SAMA فقط.")
 
 uploaded_file = st.file_uploader(
     "ارفع ملف العقد أو السياسة",
     type=["txt", "pdf"]
 )
 
-match_source = st.selectbox(
-    "مصدر المطابقة",
-    [
-        "مراجعة شاملة",
-        "لوائح SAMA فقط",
-        "لوائح CMA فقط",
-        "سياسات الشركة الداخلية فقط"
-    ]
-)
+show_text = st.checkbox("عرض النص المستخرج من الملف للتأكد", value=False)
 
 analyze = st.button("ابدأ الفحص")
 
+
 # =========================
-# RESULTS
+# النتائج
 # =========================
 
 if analyze and not uploaded_file:
-    st.warning("ارفع ملف TXT أو PDF أولا عشان يبدأ الفحص.")
+    st.warning("ارفع ملف TXT أو PDF أولًا عشان يبدأ الفحص.")
 
 if uploaded_file and analyze:
     contract_text = extract_text_from_file(uploaded_file)
 
-    if show_extracted_text:
+    if show_text:
         st.text_area("النص المستخرج من الملف", contract_text, height=220)
 
     if not contract_text.strip():
         st.error("لم يتمكن النظام من قراءة النص من الملف. جرّب ملف TXT أو PDF يحتوي على نص قابل للنسخ.")
     else:
-        results = analyze_contract(contract_text, match_source)
+        results = analyze_contract_against_sama(contract_text)
         risk_score, compliance_score, high_count, medium_count, low_count = calculate_scores(results)
         final_message, message_type = get_final_message(risk_score, len(results))
 
@@ -324,19 +481,16 @@ if uploaded_file and analyze:
         </div>
         """, unsafe_allow_html=True)
 
-        k1, k2, k3, k4 = st.columns(4)
+        c1, c2, c3 = st.columns(3)
 
-        with k1:
+        with c1:
             st.metric("نسبة الخطورة", f"{risk_score}%")
 
-        with k2:
+        with c2:
             st.metric("درجة الامتثال", f"{compliance_score}/100")
 
-        with k3:
-            st.metric("مخاطر عالية", high_count)
-
-        with k4:
-            st.metric("مخاطر متوسطة", medium_count)
+        with c3:
+            st.metric("عدد المخاطر", len(results))
 
         if message_type == "success":
             st.success(final_message)
@@ -347,22 +501,45 @@ if uploaded_file and analyze:
         else:
             st.info(final_message)
 
-        st.caption(f"وضعية القراءة: {review_mode} | شهية المخاطر: {risk_appetite} | وضع السرية: {'مفعل' if confidential_mode else 'غير مفعل'}")
+        pdf_report = create_pdf_report(
+            results=results,
+            risk_score=risk_score,
+            compliance_score=compliance_score,
+            high_count=high_count,
+            medium_count=medium_count,
+            final_message=final_message
+        )
+
+        st.download_button(
+            label="تحميل تقرير PDF",
+            data=pdf_report,
+            file_name="mumtathil_sama_report.pdf",
+            mime="application/pdf"
+        )
 
         if not results:
             st.markdown("""
             <div class="green-box">
-            لم يتم اكتشاف مخاطر واضحة في هذا الملف بناء على قاعدة البيانات الحالية.
-            هذه النتيجة لا تعتبر رأيا قانونيا نهائيا.
+            لم يتم اكتشاف بنود غير متوافقة مع متطلبات SAMA بناءً على قاعدة البيانات الحالية.
+            هذه النتيجة لا تعتبر رأيًا قانونيًا نهائيًا.
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.subheader("المخاطر المكتشفة")
+            st.subheader("البنود غير المتوافقة مع متطلبات SAMA")
 
             for i, item in enumerate(results, start=1):
                 with st.expander(f"الخطر رقم {i}: {item['topic']} - {item['risk_level']}"):
-                    st.write("الجهة المرتبطة:", item["authority"])
                     st.write("الكلمات المكتشفة:", item["matched_keywords"])
+
+                    st.markdown("**المرجع التنظيمي المرتبط:**")
+                    st.info(item["regulation_reference"])
+
+                    st.markdown(f"""
+                    <div class="blue-box">
+                    <b>نص المتطلب التنظيمي:</b><br>
+                    {item["regulation_text"]}
+                    </div>
+                    """, unsafe_allow_html=True)
 
                     st.markdown(f"""
                     <div class="yellow-box">
@@ -385,11 +562,4 @@ if uploaded_file and analyze:
                     </div>
                     """, unsafe_allow_html=True)
 
-            st.subheader("الخلاصة")
-
-            if risk_score >= 75:
-                st.error("لا ينصح باعتماد الملف قبل تعديل البنود عالية الخطورة ومراجعته قانونيا.")
-            elif risk_score >= 40:
-                st.warning("يفضل تعديل البنود متوسطة وعالية الخطورة قبل الاعتماد.")
-            else:
-                st.info("الملف قريب من القبول، لكن يحتاج مراجعة نهائية حسب حساسية العقد.")
+        st.caption("ملاحظة: النصوص التنظيمية في نسخة الديمو صياغات مبسطة لأغراض الاختبار، ويمكن لاحقًا استبدالها بنصوص رسمية من SAMA Rulebook.")
